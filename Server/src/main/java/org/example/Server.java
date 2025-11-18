@@ -5,8 +5,9 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -15,10 +16,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Server {
 
     private final int port;
-    private final CopyOnWriteArrayList<ClientHandler> clients = new CopyOnWriteArrayList<>();
+    private List<ClientHandler> clients = Collections.synchronizedList(new ArrayList<>());
+    private List<String> history = Collections.synchronizedList(new ArrayList<>());
     private ServerSocket serverSocket;
     private volatile boolean isRunning = false;
-    private final List<String> history = new CopyOnWriteArrayList<>();
     private final AtomicInteger clientCount = new AtomicInteger(0);
 
     private static final int ACCEPT_TIMEOUT_MS = 10_000; // timeout pour accept()
