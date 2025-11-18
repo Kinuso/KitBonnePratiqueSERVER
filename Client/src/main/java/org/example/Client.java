@@ -54,13 +54,20 @@ public class Client {
      * Lecture des messages depuis le serveur.
      */
     private void receiveMessages() {
-        try (BufferedReader reader = createReader()) {
-            String message;
-            while ((message = readServerMessage(reader)) != null) {
+        BufferedReader reader = null;
+        try {
+            reader = createReader();
+            while (true) {
+                String message = reader.readLine();
+                if (message == null) {
+                    System.out.println("Server closed the connection.");
+                    break;
+                }
+                if (message.trim().isEmpty()) {
+                    continue;
+                }
                 displayReceivedMessage(message);
             }
-        } catch (SocketTimeoutException e) {
-            System.out.println("Timeout reached. No messages received.");
         } catch (IOException e) {
             System.out.println("Disconnected from server.");
         }
@@ -68,10 +75,6 @@ public class Client {
 
     private BufferedReader createReader() throws IOException {
         return new BufferedReader(new InputStreamReader(socket.getInputStream()));
-    }
-
-    private String readServerMessage(BufferedReader reader) throws IOException {
-        return reader.readLine();
     }
 
     private void displayReceivedMessage(String message) {
