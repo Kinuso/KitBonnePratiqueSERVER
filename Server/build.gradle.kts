@@ -8,7 +8,7 @@ version = "1.0-SNAPSHOT"
 repositories {
     mavenCentral()
 }
-Voc
+
 dependencies {
     implementation("commons-io:commons-io:2.21.0")
     implementation("org.apache.commons:commons-lang3:3.20.0")

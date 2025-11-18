@@ -2,14 +2,14 @@ package org.example;
 
 import java.io.*;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
+import java.net.SocketException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Classe représentant un client de chat simple.
+ * Classe représentant un client de chat simple, robuste.
  */
 public class Client {
 
@@ -18,9 +18,9 @@ public class Client {
     private Socket socket;
     private ExecutorService executorService;
     private BufferedReader consoleReader;
+    private volatile boolean running = false;
     private int messageCount = 0;
 
-    private static final int SOCKET_TIMEOUT_MS = 10000; // 10 secondes
     private static final int MAX_MESSAGE_LENGTH = 512; // message trop long
 
     public Client(String serverAddress, int serverPort) {
@@ -34,20 +34,26 @@ public class Client {
     public void connect() throws IOException, InterruptedException, ExecutionException {
         createSocket();
         executorService = Executors.newFixedThreadPool(2);
+        running = true;
 
         Future<?> receiverTask = executorService.submit(this::receiveMessages);
+        // léger délai pour s'assurer que le reader est prêt (optionnel)
         Thread.sleep(100);
         Future<?> senderTask = executorService.submit(this::sendMessages);
 
-        receiverTask.get();
-        senderTask.get();
-
-        shutdown();
+        // attendre que les deux tâches se terminent (si elles se terminent)
+        try {
+            receiverTask.get();
+            senderTask.get();
+        } finally {
+            shutdown();
+        }
     }
 
     private void createSocket() throws IOException {
         socket = new Socket(serverAddress, serverPort);
-        socket.setSoTimeout(SOCKET_TIMEOUT_MS);
+        // Ne pas mettre un timeout trop court côté client, sinon on sera déconnecté automatiquement.
+        // Si tu veux détecter inactivité côté client, définir un timeout long ou gérer ping/pong.
     }
 
     /**
@@ -57,8 +63,15 @@ public class Client {
         BufferedReader reader = null;
         try {
             reader = createReader();
-            while (true) {
-                String message = reader.readLine();
+            while (running) {
+                String message;
+                try {
+                    message = reader.readLine();
+                } catch (SocketException se) {
+                    System.out.println("Socket error while reading: " + se.getMessage());
+                    break;
+                }
+
                 if (message == null) {
                     System.out.println("Server closed the connection.");
                     break;
@@ -69,7 +82,14 @@ public class Client {
                 displayReceivedMessage(message);
             }
         } catch (IOException e) {
-            System.out.println("Disconnected from server.");
+            System.out.println("Disconnected from server: " + e.getMessage());
+        } finally {
+            // Ne pas fermer le socket ici si l'autre thread écrit encore ; shutdown gère cela
+            try {
+                if (reader != null) reader.close();
+            } catch (IOException ignored) {
+            }
+            running = false;
         }
     }
 
@@ -91,18 +111,26 @@ public class Client {
         try (BufferedWriter writer = createWriter()) {
             consoleReader = createConsoleReader();
             String input;
-            while ((input = readUserInput()) != null) {
+            while (running && (input = readUserInput()) != null) {
                 if (!input.trim().isEmpty()) {
+                    // Tronquer localement si message trop long
                     if (input.length() > MAX_MESSAGE_LENGTH) {
                         input = input.substring(0, MAX_MESSAGE_LENGTH);
                         System.out.println("[Warning] Message truncated to " + MAX_MESSAGE_LENGTH + " characters.");
                     }
-                    sendMessage(writer, input);
-                    incrementMessageCount();
+                    try {
+                        sendMessage(writer, input);
+                        incrementMessageCount();
+                    } catch (IOException e) {
+                        System.out.println("Failed to send message: " + e.getMessage());
+                        break;
+                    }
                 }
             }
         } catch (IOException e) {
-            System.out.println("Error sending message: " + e.getMessage());
+            System.out.println("Error in sendMessages: " + e.getMessage());
+        } finally {
+            running = false;
         }
     }
 
@@ -115,6 +143,7 @@ public class Client {
     }
 
     private String readUserInput() throws IOException {
+        if (consoleReader == null) return null;
         return consoleReader.readLine();
     }
 
@@ -132,12 +161,19 @@ public class Client {
     /**
      * Arrêt propre du client.
      */
-    private void shutdown() throws IOException {
+    private void shutdown() {
+        running = false;
         if (executorService != null) {
-            executorService.shutdown();
+            executorService.shutdownNow();
         }
-        if (socket != null && !socket.isClosed()) {
-            socket.close();
+        try {
+            if (socket != null && !socket.isClosed()) socket.close();
+        } catch (IOException ignored) {
         }
+        try {
+            if (consoleReader != null) consoleReader.close();
+        } catch (IOException ignored) {
+        }
+        System.out.println("Client shutdown complete.");
     }
 }
